@@ -17,6 +17,8 @@ class Config:
     background_path = "Images\\Background.jpg"
     ratio_thresh = 0.7
     objects_list = []
+    rows = 2
+    columns = 5
 
 
 class Object:
@@ -49,18 +51,31 @@ class Object:
 
 
 def read_objects() -> None:
+    titles, origin, images, cut_images = [], [], [], []
+
     for image_path in listdir(Config.objects_path):
         image = cv2.imread(path.join(Config.objects_path, image_path))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        origin_image = np.copy(image)
 
         # Selection of a part of the image along the contour of the object
-        properties = extract_object(image)
+        properties, extract_image = extract_object(image)
         image = np.array(properties.image, dtype=np.int32)
         image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
         points, descriptors = find_points(image)
 
         object_name, _ = image_path.split('.')
         Config.objects_list.append(Object(object_name, points, descriptors, properties))
+
+        # The drawing part
+        titles.append(object_name)
+        images.append(extract_image)
+        cut_images.append(image)
+        origin.append(origin_image)
+
+    draw_images(origin, titles, Config.rows, Config.columns)
+    draw_images(images, titles, Config.rows, Config.columns)
+    draw_images(cut_images, titles, Config.rows, Config.columns, True)
 
 
 def extract_object(image: np.ndarray):
@@ -78,8 +93,7 @@ def extract_object(image: np.ndarray):
     mask = labels == (item + 1)
     image[~mask] = 255
 
-    draw(image)
-    return properties[item]
+    return properties[item], image
 
 
 def find_points(image: np.ndarray):
@@ -87,23 +101,46 @@ def find_points(image: np.ndarray):
     return sift.detectAndCompute(image, None)
 
 
-def draw(image: np.ndarray) -> None:
-    plt.imshow(image)
+def draw_images(images: list, names: list, rows: int, columns: int, gray=False) -> None:
+    fig, axes = plt.subplots(rows, columns, figsize=(30, 30))
+
+    for i in range(rows):
+        for j in range(columns):
+            index = i * columns + j
+            axes[i, j].set_title(names[index])
+            if gray:
+                axes[i, j].imshow(images[index], cmap="gray")
+            else:
+                axes[i, j].imshow(images[index])
     plt.show()
 
 
-def read_images(image_path: str) -> bool:
+def draw(image: np.ndarray, name: str, gray=False) -> None:
+    if gray:
+        plt.imshow(image, cmap="gray")
+    else:
+        plt.imshow(image)
+    plt.title(name)
+    plt.show()
+
+
+def read_image(image_path: str) -> bool:
     # Getting the difference between background and objects
     background = cv2.cvtColor(cv2.imread(Config.background_path), cv2.COLOR_RGB2GRAY)
-    image = cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_RGB2GRAY)
+    image = cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB)
+    origin_image = np.copy(image)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     _, difference = structural_similarity(image, background, full=True)
 
     # Getting objects areas and a polygon
-    difference = canny(difference, sigma=1.821, high_threshold=0.85)
+    difference = canny(difference, sigma=2.308, high_threshold=0.71)
     difference = binary_closing(difference, footprint=np.ones((5, 5)))
     difference = binary_fill_holes(difference)
     difference = binary_opening(difference, footprint=np.ones((15, 15)))
-    draw(difference)
+
+    # The drawing part
+    draw(origin_image, "The input image")
+    draw(difference, "Object areas on the input image")
 
     # Getting polygon properties
     labels = sk_measure_label(difference)
@@ -131,7 +168,7 @@ def find_object(region) -> Object:
 
     proportions = np.array([element.match_objects(item) for element in Config.objects_list])
     original_object = proportions.argmax()
-    print(f"{Config.objects_list[original_object].name}: {np.max(proportions)}")
+    print(f"The matching object is {Config.objects_list[original_object].name} with value {np.max(proportions)}")
 
     return Config.objects_list[original_object]
 
@@ -143,4 +180,4 @@ def place_objects(polygon_prop, objects_set: list) -> bool:
 
 def check_image(image_path: str) -> bool:
     read_objects()
-    return read_images(image_path)
+    return read_image(image_path)
